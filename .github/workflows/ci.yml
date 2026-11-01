@@ -1,0 +1,35 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Platforms, toolchains and libraries are pinned in platformio.ini, so
+      # its hash is the cache key.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio
+          key: pio-${{ hashFiles('platformio.ini') }}
+
+      - run: pip install platformio==6.2.0
+
+      - run: pio test -e native
+
+      - run: pio run -e esp32dev

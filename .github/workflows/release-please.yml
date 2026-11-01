@@ -1,0 +1,59 @@
+name: release-please
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-please
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: release
+        with:
+          config-file: .github/release-please-config.json
+          manifest-file: .github/release-please-manifest.json
+
+      # The binaries are built in this job rather than on the tag: a tag
+      # pushed with GITHUB_TOKEN starts no workflow run.
+      - uses: actions/checkout@v4
+        if: steps.release.outputs.release_created
+
+      - uses: actions/setup-python@v5
+        if: steps.release.outputs.release_created
+        with:
+          python-version: "3.12"
+
+      - name: Build the release binaries
+        if: steps.release.outputs.release_created
+        run: |
+          set -euo pipefail
+          pip install platformio==6.2.0
+          pio run -e esp32dev
+          build=.pio/build/esp32dev
+          # The offsets are the ones `pio run -t upload` writes for esp32dev.
+          # A merged image flashes a blank board in one write at 0x0.
+          pio pkg exec -p tool-esptoolpy -- esptool.py --chip esp32 merge_bin \
+            -o "$build/factory.bin" --flash_mode dio --flash_size 4MB \
+            0x1000 "$build/bootloader.bin" \
+            0x8000 "$build/partitions.bin" \
+            0xe000 "$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin" \
+            0x10000 "$build/firmware.bin"
+
+      - name: Upload the release binaries
+        if: steps.release.outputs.release_created
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: |
+          gh release upload "$TAG" \
+            .pio/build/esp32dev/firmware.bin \
+            .pio/build/esp32dev/factory.bin
