@@ -133,11 +133,17 @@ esptool.py --chip esp32 write_flash 0x0 factory.bin
 
 The `esp32dev-wokwi` environment builds for the Wokwi ESP32 simulator, wired
 as in `diagram.json`. It skips the captive portal and compiles in the open
-`Wokwi-GUEST` network, gateway `host.wokwi.internal:8081` and source
-`sim-source`, so it must not be flashed to a device. `wokwi.toml` routes the
-simulated network through a local `wokwigw` on `ws://localhost:9011`, which
-lets the simulated device reach a gateway on the host.
+`Wokwi-GUEST` network and a gateway, so it must not be flashed to a device.
+By default the gateway is `host.wokwi.internal:8081` without TLS and the source
+is `sim-source`; `wokwi.toml` routes the simulated network through a local
+`wokwigw` on `ws://localhost:9011`, which lets the simulated device reach a
+gateway on the host. `SIM_WOKWI_HOST`, `SIM_WOKWI_PORT`, `SIM_WOKWI_TLS` and
+`SIM_WOKWI_SOURCE` in `PLATFORMIO_BUILD_FLAGS` point it elsewhere, and the
+environment variable `SIM_WOKWI_TOKEN` supplies the gateway's auth token.
 
 ```sh
 pio run -e esp32dev-wokwi
+
+PLATFORMIO_BUILD_FLAGS='-D SIM_WOKWI_HOST=\"tally.example.com\" -D SIM_WOKWI_PORT=443 -D SIM_WOKWI_TLS=1' \
+SIM_WOKWI_TOKEN=<token> pio run -e esp32dev-wokwi
 ```

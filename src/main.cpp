@@ -63,6 +63,22 @@ void setLeds(const tally::Leds& l) {
   digitalWrite(cfg.pinGreen, l.green ? HIGH : LOW);
 }
 
+#ifdef SIM_WOKWI
+// Simulator defaults: a gateway on the host reached through wokwigw.
+#ifndef SIM_WOKWI_HOST
+#define SIM_WOKWI_HOST "host.wokwi.internal"
+#endif
+#ifndef SIM_WOKWI_PORT
+#define SIM_WOKWI_PORT 8081
+#endif
+#ifndef SIM_WOKWI_TLS
+#define SIM_WOKWI_TLS 0
+#endif
+#ifndef SIM_WOKWI_SOURCE
+#define SIM_WOKWI_SOURCE "sim-source"
+#endif
+#endif  // SIM_WOKWI
+
 #ifndef SIM_WOKWI
 bool buttonHeld() {
   pinMode(cfg.pinButton, INPUT_PULLUP);
@@ -250,8 +266,9 @@ void setup() {
   // Simulator build: no captive portal, fixed Wokwi network and gateway.
   cfg.host = SIM_WOKWI_HOST;
   cfg.port = SIM_WOKWI_PORT;
-  cfg.tls = false;
+  cfg.tls = SIM_WOKWI_TLS;
   cfg.sourceId = SIM_WOKWI_SOURCE;
+  cfg.token = SIM_WOKWI_TOKEN;
 #else
   WiFiManager wm;
   if (buttonHeld() || cfg.host.isEmpty() || cfg.sourceId.isEmpty() || !wm.getWiFiIsSaved()) {

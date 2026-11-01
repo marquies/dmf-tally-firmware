@@ -14,7 +14,9 @@ PlatformIO project, Arduino framework. `esp32dev` is the device image;
   reason other than a valid tally for the assigned source.
 - Never build credentials, hosts or tokens into the device image;
   configuration lives in NVS. The simulator build compiles in the simulator's
-  open network and a gateway address, and nothing else.
+  open network, a gateway address and a token taken from the build
+  environment, and nothing else; no address beyond the local default is
+  committed.
 - Platform, library and tool versions are pinned in `platformio.ini`, and CI
   keys its cache on that file.
 - `src/version.h` is bumped by release-please through the
