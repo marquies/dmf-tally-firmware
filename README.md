@@ -47,7 +47,7 @@ SSID and password are stored by WiFiManager in the ESP32 Wi-Fi NVS.
 | Setting                  | Default                 |
 | ------------------------ | ----------------------- |
 | Gateway host             | none, required          |
-| Gateway port             | 80                      |
+| Gateway port             | 8080                    |
 | TLS (`1`/`0`)            | 0                       |
 | Auth token               | none                    |
 | Device ID                | `tally-` + last 3 bytes of the Wi-Fi MAC in hex |

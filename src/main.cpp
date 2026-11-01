@@ -18,7 +18,7 @@ const uint32_t kButtonHoldMs = 1000;
 
 struct Config {
   String host;
-  uint16_t port = 80;
+  uint16_t port = 8080;
   bool tls = false;
   String token;
   String deviceId;
