@@ -107,3 +107,16 @@ and application for a blank board:
 ```sh
 esptool.py --chip esp32 write_flash 0x0 factory.bin
 ```
+
+## Simulation
+
+The `esp32dev-wokwi` environment builds for the Wokwi ESP32 simulator, wired
+as in `diagram.json`. It skips the captive portal and compiles in the open
+`Wokwi-GUEST` network, gateway `host.wokwi.internal:8081` and source
+`sim-source`, so it must not be flashed to a device. `wokwi.toml` routes the
+simulated network through a local `wokwigw` on `ws://localhost:9011`, which
+lets the simulated device reach a gateway on the host.
+
+```sh
+pio run -e esp32dev-wokwi
+```

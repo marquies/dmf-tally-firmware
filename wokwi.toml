@@ -1,0 +1,12 @@
+# Wokwi simulation of the esp32dev-wokwi environment.
+# Build first: pio run -e esp32dev-wokwi
+[wokwi]
+version = 1
+firmware = '.pio/build/esp32dev-wokwi/firmware.bin'
+elf = '.pio/build/esp32dev-wokwi/firmware.elf'
+
+# Route the simulated WiFi through a locally running wokwigw, so the
+# firmware can reach the tally gateway on this machine via
+# host.wokwi.internal.
+[net]
+gateway = 'ws://localhost:9011'

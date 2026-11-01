@@ -62,6 +62,7 @@ void setLeds(const tally::Leds& l) {
   digitalWrite(cfg.pinGreen, l.green ? HIGH : LOW);
 }
 
+#ifndef SIM_WOKWI
 bool buttonHeld() {
   pinMode(cfg.pinButton, INPUT_PULLUP);
   uint32_t start = millis();
@@ -131,6 +132,7 @@ void provision() {
   }
   ESP.restart();
 }
+#endif  // SIM_WOKWI
 
 void onEvent(WStype_t type, uint8_t* payload, size_t length) {
   switch (type) {
@@ -171,14 +173,26 @@ void setup() {
   setLeds(tally::Leds());
 
   WiFi.mode(WIFI_STA);
+#ifdef SIM_WOKWI
+  // Simulator build: no captive portal, fixed Wokwi network and gateway.
+  cfg.host = SIM_WOKWI_HOST;
+  cfg.port = SIM_WOKWI_PORT;
+  cfg.tls = false;
+  cfg.sourceId = SIM_WOKWI_SOURCE;
+#else
   WiFiManager wm;
   if (buttonHeld() || cfg.host.isEmpty() || cfg.sourceId.isEmpty() || !wm.getWiFiIsSaved()) {
     provision();
   }
+#endif
 
   client = new tally::Client(cfg.timeoutS * 1000);
   WiFi.setAutoReconnect(true);
+#ifdef SIM_WOKWI
+  WiFi.begin("Wokwi-GUEST", "", 6);
+#else
   WiFi.begin();
+#endif
 
   // Always set: the library's default "Origin: file://" is rejected by the
   // gateway with 403 because the origin has no host.
