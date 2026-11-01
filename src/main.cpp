@@ -143,7 +143,8 @@ void onEvent(WStype_t type, uint8_t* payload, size_t length) {
       break;
     }
     case WStype_DISCONNECTED:
-      Serial.println("ws: disconnected");
+      Serial.printf("ws: disconnected: %.*s\n", static_cast<int>(length),
+                    reinterpret_cast<const char*>(payload));
       client->onDisconnected();
       break;
     case WStype_TEXT: {
@@ -179,7 +180,9 @@ void setup() {
   WiFi.setAutoReconnect(true);
   WiFi.begin();
 
-  if (!cfg.token.isEmpty()) ws.setExtraHeaders(("Authorization: Bearer " + cfg.token).c_str());
+  // Always set: the library's default "Origin: file://" is rejected by the
+  // gateway with 403 because the origin has no host.
+  ws.setExtraHeaders(cfg.token.isEmpty() ? "" : ("Authorization: Bearer " + cfg.token).c_str());
   if (cfg.tls) {
     ws.beginSSL(cfg.host.c_str(), cfg.port, kPath);
   } else {
