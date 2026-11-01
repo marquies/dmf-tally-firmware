@@ -36,12 +36,14 @@ an external pull-up when used for the button.
 | no registered, tally or heartbeat for timeout  | off | off   |
 | WebSocket closed, Wi-Fi lost, not registered   | off | off   |
 | provisioning portal active                     | off | off   |
+| settings saved, restart pending                | off | off   |
 
 Program is `state` `program` or `key_fill` in the gateway's tally message.
 
 ## Configuration
 
-Stored in NVS (namespace `tally`) and entered through the captive portal. Wi-Fi
+Stored in NVS (namespace `tally`) and entered through the captive portal or the
+settings page. Wi-Fi
 SSID and password are stored by WiFiManager in the ESP32 Wi-Fi NVS.
 
 | Setting                  | Default                 |
@@ -56,7 +58,7 @@ SSID and password are stored by WiFiManager in the ESP32 Wi-Fi NVS.
 | Red, green, button GPIO  | 25, 26, 0               |
 
 - The auth token is sent as `Authorization: Bearer <token>` on the upgrade
-  request. The portal never shows it; leaving the field blank keeps the stored
+  request. Neither page shows it; leaving the field blank keeps the stored
   token. Erasing the flash (`pio run -e esp32dev -t erase`) clears it along with
   everything else.
 - With TLS on, the server certificate is not verified.
@@ -79,6 +81,21 @@ the page the captive portal shows (or `http://192.168.4.1`), choose the Wi-Fi
 network, fill in the settings and save. The device restarts with the new
 configuration.
 
+### Settings page
+
+Once connected to Wi-Fi, the device serves the same settings on port 80 at its
+LAN address and at `http://<device ID>.local` (mDNS; `.` and `_` in the device
+ID become `-`). Both are printed on serial after the connection. The Parameters
+page holds the gateway settings; the Wi-Fi page changes the network. Saving
+persists the settings as the portal does, turns the LEDs off and restarts the
+device about 1.5 s later.
+
+The page has no authentication: anyone on the same network can change the
+settings, including replacing the auth token. The token is never displayed. The
+Wi-Fi page scans for networks and a Wi-Fi change connects before it returns, so
+tally handling pauses for a few seconds while either runs. The simulator build
+has no settings page.
+
 ## Runtime behaviour
 
 The device reconnects Wi-Fi automatically, reconnects the WebSocket every 2 s
@@ -86,7 +103,8 @@ while it is closed, and sends `register` on every connect. Any `registered`,
 `tally` or `heartbeat` resets the fail-safe timer; when it expires, the device
 turns the LEDs off, closes the connection and reconnects. A tally for another
 source, or with a sequence at or below the last applied one in the same
-session, is ignored. Serial output at 115200 baud logs connection state and
+session, is ignored. The settings page is served from the main loop alongside the WebSocket.
+Serial output at 115200 baud logs connection state and
 source assignments.
 
 ## Building and flashing

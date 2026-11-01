@@ -2,6 +2,7 @@
 #include <Preferences.h>
 #include <esp_mac.h>
 #include <WebSocketsClient.h>
+#include <ESPmDNS.h>
 #include <WiFi.h>
 #include <WiFiManager.h>
 
@@ -88,33 +89,37 @@ uint8_t pinOr(const char* value, uint8_t fallback, bool output) {
   return ok ? v : fallback;
 }
 
-// Runs the captive portal until Wi-Fi and the gateway settings are saved,
-// then restarts so the device boots straight into the saved configuration.
-void provision() {
-  Serial.println("provisioning: starting captive portal " + cfg.deviceId);
-  WiFiManager wm;
-  String port(cfg.port), timeout(cfg.timeoutS), red(cfg.pinRed), green(cfg.pinGreen),
-      button(cfg.pinButton);
-  WiFiManagerParameter pHost("host", "Gateway host", cfg.host.c_str(), 128);
-  WiFiManagerParameter pPort("port", "Gateway port", port.c_str(), 5);
-  WiFiManagerParameter pTls("tls", "TLS (1 = on, 0 = off)", cfg.tls ? "1" : "0", 1);
-  // Not prefilled: the portal is an open access point.
-  WiFiManagerParameter pToken("token", "Auth token (blank keeps the stored one)", "", 256);
-  WiFiManagerParameter pDevice("device", "Device ID", cfg.deviceId.c_str(), 64);
-  WiFiManagerParameter pSource("source", "Source ID", cfg.sourceId.c_str(), 128);
-  WiFiManagerParameter pTimeout("timeout", "Timeout seconds (0 = gateway value)",
-                                timeout.c_str(), 5);
-  WiFiManagerParameter pRed("pin_red", "Red (program) GPIO", red.c_str(), 2);
-  WiFiManagerParameter pGreen("pin_green", "Green (preview) GPIO", green.c_str(), 2);
-  WiFiManagerParameter pButton("pin_button", "Provisioning button GPIO", button.c_str(), 2);
-  WiFiManagerParameter* params[] = {&pHost,   &pPort,    &pTls, &pToken,   &pDevice,
-                                    &pSource, &pTimeout, &pRed, &pGreen, &pButton};
-  for (auto* p : params) wm.addParameter(p);
-  wm.setSaveConfigCallback([] { shouldSave = true; });
-  wm.setBreakAfterConfig(true);
-  wm.startConfigPortal(cfg.deviceId.c_str());
+// The settings shared by the provisioning portal and the station-mode page.
+// Not prefilled with the token: the pages are served without authentication.
+struct SettingsForm {
+  String port, timeout, red, green, button;
+  WiFiManagerParameter pHost, pPort, pTls, pToken, pDevice, pSource, pTimeout, pRed, pGreen,
+      pButton;
 
-  if (shouldSave) {
+  SettingsForm()
+      : port(cfg.port),
+        timeout(cfg.timeoutS),
+        red(cfg.pinRed),
+        green(cfg.pinGreen),
+        button(cfg.pinButton),
+        pHost("host", "Gateway host", cfg.host.c_str(), 128),
+        pPort("port", "Gateway port", port.c_str(), 5),
+        pTls("tls", "TLS (1 = on, 0 = off)", cfg.tls ? "1" : "0", 1),
+        pToken("token", "Auth token (blank keeps the stored one)", "", 256),
+        pDevice("device", "Device ID", cfg.deviceId.c_str(), 64),
+        pSource("source", "Source ID", cfg.sourceId.c_str(), 128),
+        pTimeout("timeout", "Timeout seconds (0 = gateway value)", timeout.c_str(), 5),
+        pRed("pin_red", "Red (program) GPIO", red.c_str(), 2),
+        pGreen("pin_green", "Green (preview) GPIO", green.c_str(), 2),
+        pButton("pin_button", "Provisioning button GPIO", button.c_str(), 2) {}
+
+  void attach(WiFiManager& wm) {
+    WiFiManagerParameter* params[] = {&pHost,   &pPort,    &pTls, &pToken,   &pDevice,
+                                      &pSource, &pTimeout, &pRed, &pGreen,   &pButton};
+    for (auto* p : params) wm.addParameter(p);
+  }
+
+  void save() {
     prefs.begin("tally", false);
     prefs.putString("host", pHost.getValue());
     long p = String(pPort.getValue()).toInt();
@@ -130,7 +135,61 @@ void provision() {
     prefs.putUChar("pin_button", pinOr(pButton.getValue(), cfg.pinButton, false));
     prefs.end();
   }
+};
+
+// Runs the captive portal until Wi-Fi and the gateway settings are saved,
+// then restarts so the device boots straight into the saved configuration.
+void provision() {
+  Serial.println("provisioning: starting captive portal " + cfg.deviceId);
+  WiFiManager wm;
+  SettingsForm form;
+  form.attach(wm);
+  wm.setSaveConfigCallback([] { shouldSave = true; });
+  wm.setBreakAfterConfig(true);
+  wm.startConfigPortal(cfg.deviceId.c_str());
+
+  if (shouldSave) form.save();
   ESP.restart();
+}
+
+// Serves the same settings on the LAN address once Wi-Fi is up. Saving
+// persists them and schedules a restart; the delay lets the response page
+// reach the browser first.
+const uint32_t kRestartDelayMs = 1500;
+WiFiManager* webWm;
+SettingsForm* webForm;
+uint32_t restartAt = 0;
+
+void scheduleRestart() {
+  setLeds(tally::Leds());
+  restartAt = millis() + kRestartDelayMs;
+}
+
+// DNS labels allow neither '.' nor '_', both of which a device ID may hold.
+String mdnsName() {
+  String name = cfg.deviceId;
+  name.replace('.', '-');
+  name.replace('_', '-');
+  return name;
+}
+
+void startSettingsPage() {
+  webWm = new WiFiManager();
+  webForm = new SettingsForm();
+  webForm->attach(*webWm);
+  // Parameters get their own page; the Wi-Fi page scans, which blocks.
+  static const char* menu[] = {"param", "wifi"};
+  webWm->setMenu(menu, 2);
+  webWm->setSaveParamsCallback([] {
+    webForm->save();
+    scheduleRestart();
+  });
+  webWm->setSaveConfigCallback(scheduleRestart);
+  webWm->startWebPortal();
+  String name = mdnsName();
+  if (MDNS.begin(name.c_str())) MDNS.addService("http", "tcp", 80);
+  Serial.printf("settings: http://%s/ and http://%s.local/\n",
+                WiFi.localIP().toString().c_str(), name.c_str());
 }
 #endif  // SIM_WOKWI
 
@@ -213,6 +272,9 @@ void loop() {
   if (up != wifiUp) {
     Serial.println(up ? "wifi: connected" : "wifi: lost");
     wifiUp = up;
+#ifndef SIM_WOKWI
+    if (up && !webWm) startSettingsPage();
+#endif
     if (!up) {
       ws.disconnect();
       client->onDisconnected();
@@ -226,5 +288,13 @@ void loop() {
       client->onDisconnected();
     }
   }
+#ifndef SIM_WOKWI
+  if (webWm) webWm->process();
+  if (restartAt) {
+    if (static_cast<int32_t>(millis() - restartAt) >= 0) ESP.restart();
+    setLeds(tally::Leds());
+    return;
+  }
+#endif
   setLeds(client->leds(millis()));
 }
