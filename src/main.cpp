@@ -89,6 +89,18 @@ uint8_t pinOr(const char* value, uint8_t fallback, bool output) {
   return ok ? v : fallback;
 }
 
+// WiFiManager registers firmware upload, erase, restart, exit and info routes
+// whatever the menu shows. The web server answers with the first handler that
+// matches, so claiming them before the library registers its own turns them
+// into 404s.
+void blockMaintenanceRoutes(WiFiManager& wm) {
+  wm.setWebServerCallback([&wm] {
+    for (const char* uri : {"/update", "/u", "/erase", "/restart", "/exit", "/close", "/info"}) {
+      wm.server->on(uri, [&wm] { wm.server->send(404, "text/plain", "Not found"); });
+    }
+  });
+}
+
 // The settings shared by the provisioning portal and the station-mode page.
 // Not prefilled with the token: the pages are served without authentication.
 struct SettingsForm {
@@ -144,6 +156,7 @@ void provision() {
   WiFiManager wm;
   SettingsForm form;
   form.attach(wm);
+  blockMaintenanceRoutes(wm);
   wm.setSaveConfigCallback([] { shouldSave = true; });
   wm.setBreakAfterConfig(true);
   wm.startConfigPortal(cfg.deviceId.c_str());
@@ -177,6 +190,7 @@ void startSettingsPage() {
   webWm = new WiFiManager();
   webForm = new SettingsForm();
   webForm->attach(*webWm);
+  blockMaintenanceRoutes(*webWm);
   // Parameters get their own page; the Wi-Fi page scans, which blocks.
   static const char* menu[] = {"param", "wifi"};
   webWm->setMenu(menu, 2);

@@ -90,6 +90,9 @@ page holds the gateway settings; the Wi-Fi page changes the network. Saving
 persists the settings as the portal does, turns the LEDs off and restarts the
 device about 1.5 s later.
 
+The library's firmware upload, erase, restart, exit and info routes answer 404
+on both portals; only the settings and Wi-Fi pages remain.
+
 The page has no authentication: anyone on the same network can change the
 settings, including replacing the auth token. The token is never displayed. The
 Wi-Fi page scans for networks and a Wi-Fi change connects before it returns, so
