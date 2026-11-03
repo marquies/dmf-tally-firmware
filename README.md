@@ -24,6 +24,12 @@ mA. All three pins can be changed in the configuration. GPIOs 34 to 39 are
 input only and have no internal pull-up, so they cannot drive an LED and need
 an external pull-up when used for the button.
 
+The `esp32c3` environment builds for the ESP32-C3 Super Mini. Its defaults are
+GPIO 0 for red, 1 for green and 9 (BOOT) for the button; serial runs over the
+native USB port. Wi-Fi transmits at 8.5 dBm, because the board's antenna
+distorts at full power, with modem sleep off, and follows the country of the
+access point's beacons so channels 12 and 13 work where allowed.
+
 ## LED states
 
 | Condition                                      | Red | Green |
@@ -70,11 +76,17 @@ SSID and password are stored by WiFiManager in the ESP32 Wi-Fi NVS.
 
 ## Provisioning
 
-The device starts the portal when no Wi-Fi network is saved, when the gateway
-host or source ID is empty, or when the provisioning button is held for one
-second within three seconds after reset. Holding GPIO 0 low during the reset
-itself enters the ESP32 ROM download mode instead, so press it after releasing
-reset.
+The device starts the portal when no Wi-Fi network is saved, or when the
+provisioning button is held for one second within three seconds after reset.
+With Wi-Fi saved but the gateway host or source ID empty, it joins the network,
+serves the settings page there and stays off the gateway with the LEDs off.
+Holding the button low during the reset itself enters the ROM download mode
+instead, so press it after releasing reset.
+
+On the ESP32-C3 the portal's own connection attempt shares the single radio
+with the access point and often fails, so the phone may report a failed
+connection. After the save the device closes the portal, retries in station
+mode only and keeps the network if that succeeds.
 
 The portal is an open access point named after the device ID. Join it, open
 the page the captive portal shows (or `http://192.168.4.1`), choose the Wi-Fi
@@ -131,7 +143,7 @@ esptool.py --chip esp32 write_flash 0x0 factory.bin
 
 ## Simulation
 
-The `esp32dev-wokwi` environment builds for the Wokwi ESP32 simulator, wired
+The `esp32dev-wokwi` environment builds for the Wokwi ESP32-C3 simulator, wired
 as in `diagram.json`. It skips the captive portal and compiles in the open
 `Wokwi-GUEST` network and a gateway, so it must not be flashed to a device.
 By default the gateway is `host.wokwi.internal:8081` without TLS and the source
