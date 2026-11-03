@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <Preferences.h>
+#include <esp_wifi.h>
 #include <esp_mac.h>
 #include <WebSocketsClient.h>
 #include <ESPmDNS.h>
@@ -25,9 +26,16 @@ struct Config {
   String deviceId;
   String sourceId;
   uint32_t timeoutS = 30;
+#ifdef CONFIG_IDF_TARGET_ESP32C3
+  // C3 Super Mini: LEDs on GPIO 0/1, BOOT button on GPIO 9.
+  uint8_t pinRed = 0;
+  uint8_t pinGreen = 1;
+  uint8_t pinButton = 9;
+#else
   uint8_t pinRed = 25;
   uint8_t pinGreen = 26;
   uint8_t pinButton = 0;
+#endif
 };
 
 Config cfg;
@@ -35,6 +43,9 @@ Preferences prefs;
 WebSocketsClient ws;
 tally::Client* client;
 bool wifiUp = false;
+// Gateway host and source ID are both set; without them only Wi-Fi and the
+// settings page run, and the LEDs stay off.
+bool gatewaySet = false;
 bool shouldSave = false;
 
 void loadConfig() {
@@ -63,6 +74,18 @@ void setLeds(const tally::Leds& l) {
   digitalWrite(cfg.pinGreen, l.green ? HIGH : LOW);
 }
 
+#ifdef CONFIG_IDF_TARGET_ESP32C3
+// C3 Super Mini: the mismatched antenna distorts at full TX power (the AP
+// becomes invisible), and modem sleep delays the auth handshake on some
+// routers until it expires (FritzBox: AUTH_EXPIRE). The country follows the
+// AP's beacons so channels 12/13 are usable where allowed.
+void tuneWifi() {
+  WiFi.setSleep(false);
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
+  esp_wifi_set_country_code("01", true);
+}
+#endif
+
 #ifdef SIM_WOKWI
 // Simulator defaults: a gateway on the host reached through wokwigw.
 #ifndef SIM_WOKWI_HOST
@@ -76,6 +99,13 @@ void setLeds(const tally::Leds& l) {
 #endif
 #ifndef SIM_WOKWI_SOURCE
 #define SIM_WOKWI_SOURCE "sim-source"
+#endif
+// LED pins of the simulated board (ESP32-C3 in diagram.json).
+#ifndef SIM_WOKWI_PIN_RED
+#define SIM_WOKWI_PIN_RED 0
+#endif
+#ifndef SIM_WOKWI_PIN_GREEN
+#define SIM_WOKWI_PIN_GREEN 1
 #endif
 #endif  // SIM_WOKWI
 
@@ -165,19 +195,48 @@ struct SettingsForm {
   }
 };
 
-// Runs the captive portal until Wi-Fi and the gateway settings are saved,
-// then restarts so the device boots straight into the saved configuration.
+// Runs the captive portal until the settings are saved, then restarts so the
+// device boots straight into the saved configuration.
 void provision() {
   Serial.println("provisioning: starting captive portal " + cfg.deviceId);
   WiFiManager wm;
   SettingsForm form;
   form.attach(wm);
   blockMaintenanceRoutes(wm);
-  wm.setSaveConfigCallback([] { shouldSave = true; });
+  // The credentials are read inside the callback: after startConfigPortal
+  // returns the library has already disabled STA and cleared them. They come
+  // from the STA config (true): the non-persistent getter reports the AP the
+  // station is connected to, which is empty when the in-portal attempt failed.
+  static String ssid, pass;
+  wm.setSaveConfigCallback([&wm] {
+    shouldSave = true;
+    ssid = wm.getWiFiSSID(true);
+    pass = wm.getWiFiPass(true);
+  });
   wm.setBreakAfterConfig(true);
+#ifdef CONFIG_IDF_TARGET_ESP32C3
+  wm.setAPCallback([](WiFiManager*) { tuneWifi(); });
+  // The in-portal attempt rarely succeeds on one radio; keep it short, the
+  // clean STA-only attempt below is the one that counts.
+  wm.setConnectTimeout(10);
+  wm.setConnectRetries(1);
+#endif
   wm.startConfigPortal(cfg.deviceId.c_str());
 
-  if (shouldSave) form.save();
+  if (shouldSave) {
+    form.save();
+    // The portal's own connect shares the single radio with the still-running
+    // AP and the handshake starves (AUTH_EXPIRE/TIMEOUT). With the portal
+    // gone, retry STA-only; begin() persists the credentials either way.
+    WiFi.mode(WIFI_STA);
+#ifdef CONFIG_IDF_TARGET_ESP32C3
+    tuneWifi();
+#endif
+    WiFi.persistent(true);
+    WiFi.begin(ssid.c_str(), pass.c_str());
+    bool ok = WiFi.waitForConnectResult(30000) == WL_CONNECTED;
+    Serial.println(ok ? "provisioning: wifi connected" : "provisioning: wifi failed");
+  }
   ESP.restart();
 }
 
@@ -257,11 +316,27 @@ void setup() {
   Serial.begin(115200);
   Serial.printf("dmf-tally-firmware %s\n", FIRMWARE_VERSION);
   loadConfig();
+#ifdef SIM_WOKWI
+  cfg.pinRed = SIM_WOKWI_PIN_RED;
+  cfg.pinGreen = SIM_WOKWI_PIN_GREEN;
+#endif
   pinMode(cfg.pinRed, OUTPUT);
   pinMode(cfg.pinGreen, OUTPUT);
   setLeds(tally::Leds());
 
+  // Boot self-test: each LED lights for one second, red then green, so a
+  // wiring or pin-config problem is visible without a gateway.
+  digitalWrite(cfg.pinRed, HIGH);
+  delay(1000);
+  digitalWrite(cfg.pinRed, LOW);
+  digitalWrite(cfg.pinGreen, HIGH);
+  delay(1000);
+  digitalWrite(cfg.pinGreen, LOW);
+
   WiFi.mode(WIFI_STA);
+#ifdef CONFIG_IDF_TARGET_ESP32C3
+  tuneWifi();
+#endif
 #ifdef SIM_WOKWI
   // Simulator build: no captive portal, fixed Wokwi network and gateway.
   cfg.host = SIM_WOKWI_HOST;
@@ -270,11 +345,14 @@ void setup() {
   cfg.sourceId = SIM_WOKWI_SOURCE;
   cfg.token = SIM_WOKWI_TOKEN;
 #else
+  // A missing gateway setting does not reopen the portal: once Wi-Fi is
+  // saved, the settings page on the LAN is where it gets filled in.
   WiFiManager wm;
-  if (buttonHeld() || cfg.host.isEmpty() || cfg.sourceId.isEmpty() || !wm.getWiFiIsSaved()) {
+  if (buttonHeld() || !wm.getWiFiIsSaved()) {
     provision();
   }
 #endif
+  gatewaySet = !cfg.host.isEmpty() && !cfg.sourceId.isEmpty();
 
   client = new tally::Client(cfg.timeoutS * 1000);
   WiFi.setAutoReconnect(true);
@@ -283,6 +361,11 @@ void setup() {
 #else
   WiFi.begin();
 #endif
+
+  if (!gatewaySet) {
+    Serial.println("gateway: host or source ID missing, settings page only");
+    return;
+  }
 
   // Always set: the library's default "Origin: file://" is rejected by the
   // gateway with 403 because the origin has no host.
@@ -311,7 +394,7 @@ void loop() {
       client->onDisconnected();
     }
   }
-  if (up) {
+  if (up && gatewaySet) {
     ws.loop();
     if (client->timedOut(millis())) {
       Serial.println("ws: timeout, reconnecting");

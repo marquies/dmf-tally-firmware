@@ -3,7 +3,7 @@
   "author": "dmf-tally-firmware",
   "editor": "wokwi",
   "parts": [
-    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+    { "type": "board-esp32-c3-devkitm-1", "id": "esp", "top": 0, "left": 0, "attrs": {} },
     { "type": "wokwi-led", "id": "led-red", "top": -60, "left": 150, "attrs": { "color": "red", "label": "program" } },
     { "type": "wokwi-led", "id": "led-green", "top": -60, "left": 220, "attrs": { "color": "green", "label": "preview" } },
     { "type": "wokwi-resistor", "id": "r1", "top": 30, "left": 160, "attrs": { "value": "220" } },
@@ -12,10 +12,10 @@
   "connections": [
     [ "esp:TX", "$serialMonitor:RX", "", [] ],
     [ "esp:RX", "$serialMonitor:TX", "", [] ],
-    [ "esp:25", "r1:1", "red", [] ],
+    [ "esp:0", "r1:1", "red", [] ],
     [ "r1:2", "led-red:A", "red", [] ],
     [ "led-red:C", "esp:GND.1", "black", [] ],
-    [ "esp:26", "r2:1", "green", [] ],
+    [ "esp:1", "r2:1", "green", [] ],
     [ "r2:2", "led-green:A", "green", [] ],
     [ "led-green:C", "esp:GND.1", "black", [] ]
   ],
