@@ -238,6 +238,48 @@ void test_valid_device_id() {
   TEST_ASSERT_FALSE(tally::validDeviceId("cam/1"));
 }
 
+// The status line is how an operator without a gateway connection finds the
+// step that fails, so each stage before a tally has to read differently.
+void test_status_names_the_stuck_step() {
+  Client c(0);
+  TEST_ASSERT_EQUAL_STRING("disconnected", c.status(0).c_str());
+  c.onConnected(0);
+  TEST_ASSERT_EQUAL_STRING("waiting for registered", c.status(0).c_str());
+  feed(c, kRegistered, 0);
+  TEST_ASSERT_EQUAL_STRING("no valid tally", c.status(0).c_str());
+  feed(c, tallyMsg("cam-1", "s1", 1, false, false, false), 10);
+  TEST_ASSERT_EQUAL_STRING("no valid tally", c.status(10).c_str());
+  TEST_ASSERT_EQUAL_STRING("timed out", c.status(10 + 30001).c_str());
+}
+
+// Program wins in the status as it does on the LEDs.
+void test_status_shows_the_tally() {
+  Client c = registeredClient();
+  feed(c, tallyMsg("cam-1", "s1", 1, false, false), 10);
+  TEST_ASSERT_EQUAL_STRING("idle", c.status(10).c_str());
+  feed(c, tallyMsg("cam-1", "s1", 2, false, true), 20);
+  TEST_ASSERT_EQUAL_STRING("preview", c.status(20).c_str());
+  feed(c, tallyMsg("cam-1", "s1", 3, true, true), 30);
+  TEST_ASSERT_EQUAL_STRING("program", c.status(30).c_str());
+  c.onDisconnected();
+  TEST_ASSERT_EQUAL_STRING("disconnected", c.status(30).c_str());
+}
+
+// A refused upgrade arrives only as an HTTP code; the hint says which
+// setting to fix. A reason that is already plain gets none.
+void test_disconnect_hint() {
+  TEST_ASSERT_EQUAL_STRING("gateway rejected the auth token",
+                           tally::disconnectHint("HTTP 401").c_str());
+  TEST_ASSERT_EQUAL_STRING("gateway rejected the auth token",
+                           tally::disconnectHint("Header response timeout - HTTP 401").c_str());
+  TEST_ASSERT_EQUAL_STRING("gateway rejected the request origin",
+                           tally::disconnectHint("HTTP 403").c_str());
+  TEST_ASSERT_EQUAL_STRING("no tally gateway at this host and port",
+                           tally::disconnectHint("HTTP 404").c_str());
+  TEST_ASSERT_EQUAL_STRING("", tally::disconnectHint("TCP connection cleanup").c_str());
+  TEST_ASSERT_EQUAL_STRING("", tally::disconnectHint("").c_str());
+}
+
 void setUp() {}
 void tearDown() {}
 
@@ -263,5 +305,8 @@ int main() {
   RUN_TEST(test_register_message);
   RUN_TEST(test_default_device_id);
   RUN_TEST(test_valid_device_id);
+  RUN_TEST(test_status_names_the_stuck_step);
+  RUN_TEST(test_status_shows_the_tally);
+  RUN_TEST(test_disconnect_hint);
   return UNITY_END();
 }

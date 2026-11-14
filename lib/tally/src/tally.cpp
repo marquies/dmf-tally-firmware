@@ -94,6 +94,13 @@ Leds decide(bool program, bool preview) {
   return l;
 }
 
+std::string disconnectHint(const std::string& reason) {
+  if (reason.find("HTTP 401") != std::string::npos) return "gateway rejected the auth token";
+  if (reason.find("HTTP 403") != std::string::npos) return "gateway rejected the request origin";
+  if (reason.find("HTTP 404") != std::string::npos) return "no tally gateway at this host and port";
+  return "";
+}
+
 uint32_t Client::timeoutMs() const {
   if (configTimeoutMs_ > 0) return configTimeoutMs_;
   if (gatewayTimeoutMs_ > 0) return gatewayTimeoutMs_;
@@ -159,6 +166,16 @@ bool Client::timedOut(uint32_t nowMs) const {
 Leds Client::leds(uint32_t nowMs) const {
   if (!connected_ || !registered_ || !valid_ || timedOut(nowMs)) return Leds();
   return decide(program_, preview_);
+}
+
+std::string Client::status(uint32_t nowMs) const {
+  if (!connected_) return "disconnected";
+  if (timedOut(nowMs)) return "timed out";
+  if (!registered_) return "waiting for registered";
+  if (!valid_) return "no valid tally";
+  if (program_) return "program";
+  if (preview_) return "preview";
+  return "idle";
 }
 
 }  // namespace tally
