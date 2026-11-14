@@ -48,6 +48,18 @@ bool wifiUp = false;
 bool gatewaySet = false;
 bool shouldSave = false;
 
+// Serial diagnostics. The WebSocket library reports a connection that never
+// opened only as "TCP connection cleanup", so after a disconnect the loop
+// resolves the gateway and opens a plain TCP connection to it, which tells a
+// network that does not route to the gateway from a TLS or HTTP refusal. At
+// most once per interval: the probe blocks the loop for up to its timeout.
+const uint32_t kStatusIntervalMs = 10000;
+const uint32_t kProbeIntervalMs = 30000;
+const uint32_t kProbeTimeoutMs = 3000;
+uint32_t lastStatusAt = 0;
+uint32_t lastProbeAt = 0;
+bool probeDue = false;
+
 void loadConfig() {
   prefs.begin("tally", true);
   cfg.host = prefs.getString("host", "");
@@ -282,6 +294,30 @@ void startSettingsPage() {
 }
 #endif  // SIM_WOKWI
 
+void printWifi() {
+  Serial.printf("wifi: ssid %s, ip %s, router %s, dns %s, rssi %d dBm\n", WiFi.SSID().c_str(),
+                WiFi.localIP().toString().c_str(), WiFi.gatewayIP().toString().c_str(),
+                WiFi.dnsIP().toString().c_str(), WiFi.RSSI());
+}
+
+void probeGateway() {
+  IPAddress ip;
+  if (!WiFi.hostByName(cfg.host.c_str(), ip)) {
+    Serial.printf("probe: %s does not resolve\n", cfg.host.c_str());
+    return;
+  }
+  WiFiClient tcp;
+  if (tcp.connect(ip, cfg.port, kProbeTimeoutMs)) {
+    Serial.printf("probe: %s (%s) port %u reachable over TCP\n", cfg.host.c_str(),
+                  ip.toString().c_str(), cfg.port);
+    tcp.stop();
+  } else {
+    Serial.printf("probe: %s (%s) port %u unreachable over TCP: this network does not "
+                  "route to the gateway\n",
+                  cfg.host.c_str(), ip.toString().c_str(), cfg.port);
+  }
+}
+
 void onEvent(WStype_t type, uint8_t* payload, size_t length) {
   switch (type) {
     case WStype_CONNECTED: {
@@ -292,10 +328,18 @@ void onEvent(WStype_t type, uint8_t* payload, size_t length) {
       ws.sendTXT(reg.c_str(), reg.size());
       break;
     }
-    case WStype_DISCONNECTED:
-      Serial.printf("ws: disconnected: %.*s\n", static_cast<int>(length),
-                    reinterpret_cast<const char*>(payload));
+    case WStype_DISCONNECTED: {
+      std::string reason(reinterpret_cast<const char*>(payload), payload ? length : 0);
+      std::string hint = tally::disconnectHint(reason);
+      Serial.printf("ws: disconnected: %s%s%s\n", reason.c_str(), hint.empty() ? "" : " - ",
+                    hint.c_str());
       client->onDisconnected();
+      probeDue = true;
+      break;
+    }
+    case WStype_ERROR:
+      Serial.printf("ws: error: %.*s\n", static_cast<int>(length),
+                    reinterpret_cast<const char*>(payload));
       break;
     case WStype_TEXT: {
       std::string before = client->sourceId();
@@ -355,6 +399,12 @@ void setup() {
   gatewaySet = !cfg.host.isEmpty() && !cfg.sourceId.isEmpty();
 
   client = new tally::Client(cfg.timeoutS * 1000);
+  WiFi.onEvent(
+      [](WiFiEvent_t, WiFiEventInfo_t info) {
+        Serial.printf("wifi: connect failed or dropped, reason %u\n",
+                      info.wifi_sta_disconnected.reason);
+      },
+      ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   WiFi.setAutoReconnect(true);
 #ifdef SIM_WOKWI
   WiFi.begin("Wokwi-GUEST", "", 6);
@@ -384,7 +434,11 @@ void setup() {
 void loop() {
   bool up = WiFi.status() == WL_CONNECTED;
   if (up != wifiUp) {
-    Serial.println(up ? "wifi: connected" : "wifi: lost");
+    if (up) {
+      printWifi();
+    } else {
+      Serial.println("wifi: lost");
+    }
     wifiUp = up;
 #ifndef SIM_WOKWI
     if (up && !webWm) startSettingsPage();
@@ -401,6 +455,21 @@ void loop() {
       ws.disconnect();
       client->onDisconnected();
     }
+    uint32_t now = millis();
+    if (probeDue && (lastProbeAt == 0 || now - lastProbeAt >= kProbeIntervalMs)) {
+      probeDue = false;
+      lastProbeAt = now;
+      // Disconnected, so the LEDs are off already; keep them off while the
+      // probe blocks.
+      setLeds(tally::Leds());
+      probeGateway();
+    }
+  }
+  if (millis() - lastStatusAt >= kStatusIntervalMs) {
+    lastStatusAt = millis();
+    Serial.printf("status: wifi %s, gateway %s, source %s\n", up ? "up" : "down",
+                  gatewaySet ? client->status(millis()).c_str() : "not configured",
+                  client->sourceId().empty() ? cfg.sourceId.c_str() : client->sourceId().c_str());
   }
 #ifndef SIM_WOKWI
   if (webWm) webWm->process();

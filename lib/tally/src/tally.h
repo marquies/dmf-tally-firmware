@@ -47,6 +47,11 @@ struct Leds {
 // Program wins over preview, so both lit shows red only.
 Leds decide(bool program, bool preview);
 
+// What a WebSocket disconnect reason means for the operator, or empty when
+// the reason says it already. The client library reports a refused upgrade
+// as "HTTP <code>"; the gateway answers 401 for a missing or wrong token.
+std::string disconnectHint(const std::string& reason);
+
 class Client {
  public:
   // configTimeoutMs of 0 defers to the gateway's timeoutMs, then to 30 s.
@@ -60,6 +65,9 @@ class Client {
   // the caller drops the connection, which reconnects and re-registers.
   bool timedOut(uint32_t nowMs) const;
   Leds leds(uint32_t nowMs) const;
+  // One word or phrase for the serial status line, naming the step the
+  // connection is stuck at, or the tally shown once there is one.
+  std::string status(uint32_t nowMs) const;
 
   bool registered() const { return registered_; }
   const std::string& sourceId() const { return sourceId_; }

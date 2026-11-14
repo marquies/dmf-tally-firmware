@@ -118,9 +118,25 @@ while it is closed, and sends `register` on every connect. Any `registered`,
 `tally` or `heartbeat` resets the fail-safe timer; when it expires, the device
 turns the LEDs off, closes the connection and reconnects. A tally for another
 source, or with a sequence at or below the last applied one in the same
-session, is ignored. The settings page is served from the main loop alongside the WebSocket.
-Serial output at 115200 baud logs connection state and
-source assignments.
+session, is ignored. The settings page is served from the main loop alongside
+the WebSocket.
+
+Serial output at 115200 baud (`pio device monitor`) logs connection state and
+source assignments, and says why a device does not connect:
+
+- `wifi:` the network, address, router, DNS server and signal once connected,
+  and the driver's reason code for every failed or dropped connection.
+- `ws: disconnected:` the reason, with a hint for an upgrade the gateway
+  refused: 401 is the token, 403 the origin, 404 a host and port without a
+  gateway.
+- `probe:` after a disconnect, at most every 30 s, whether the gateway host
+  resolves and accepts a plain TCP connection. Unreachable means the network
+  the device is on does not route to the gateway; reachable with the
+  WebSocket still failing points at TLS or the gateway settings. The probe
+  blocks the loop for up to 3 s, with the LEDs off.
+- `status:` every 10 s, Wi-Fi up or down, the step the connection is at
+  (`disconnected`, `waiting for registered`, `no valid tally`, `timed out`)
+  or the tally shown, and the source.
 
 ## Building and flashing
 
